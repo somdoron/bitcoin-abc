@@ -37,6 +37,11 @@ public:
     bool NotifyTransaction(const CTransaction &transaction);
 };
 
+class CZMQPublishHashWalletTransactionNotifier : public CZMQAbstractPublishNotifier {
+public:
+    bool NotifyWalletTransaction(const CTransaction &transaction, const uint256 &hashBlock);
+};
+
 class CZMQPublishRawBlockNotifier : public CZMQAbstractPublishNotifier {
 public:
     bool NotifyBlock(const CBlockIndex *pindex);
@@ -45,6 +50,11 @@ public:
 class CZMQPublishRawTransactionNotifier : public CZMQAbstractPublishNotifier {
 public:
     bool NotifyTransaction(const CTransaction &transaction);
+};
+
+class CZMQPublishRawWalletTransactionNotifier : public CZMQAbstractPublishNotifier {
+public:
+    bool NotifyWalletTransaction(const CTransaction &transaction, const uint256 &hashBlock);
 };
 
 #endif // BITCOIN_ZMQ_ZMQPUBLISHNOTIFIER_H

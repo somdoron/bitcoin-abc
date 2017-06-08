@@ -2,48 +2,55 @@
 # Copyright (c) 2015-2016 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
-
-#
-# Test ZMQ interface
-#
-
-from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import *
-import zmq
+"""Test the ZMQ API."""
+import configparser
+import os
 import struct
 
+from test_framework.test_framework import BitcoinTestFramework, SkipTest
+from test_framework.util import *
 
 class ZMQTest (BitcoinTestFramework):
 
     def __init__(self):
         super().__init__()
-        self.num_nodes = 2
+        self.num_nodes = 4
+
+    port = 28332
 
     def setup_nodes(self):
+        # Try to import python3-zmq. Skip this test if the import fails.
+        try:
+            import zmq
+        except ImportError:
+            raise SkipTest("python3-zmq module not available.")
+
+        # Check that bitcoin has been built with ZMQ enabled
+        config = configparser.ConfigParser()
+        if not self.options.configfile:
+            self.options.configfile = os.path.dirname(__file__) + "/config.ini"
+        config.read_file(open(self.options.configfile))
+
+        if not config["components"].getboolean("ENABLE_ZMQ"):
+            raise SkipTest("bitcoind has not been built with zmq enabled.")
+
         self.zmqContext = zmq.Context()
         self.zmqSubSocket = self.zmqContext.socket(zmq.SUB)
         self.zmqSubSocket.setsockopt(zmq.SUBSCRIBE, b"hashblock")
         self.zmqSubSocket.setsockopt(zmq.SUBSCRIBE, b"hashtx")
         self.zmqSubSocket.setsockopt(zmq.SUBSCRIBE, b"hashwallettx")
-        ip_address = "tcp://127.0.0.1:28332"
-        self.zmqSubSocket.connect(ip_address)
-        extra_args = [
-            ['-zmqpubhashtx=%s' % ip_address,
-             '-zmqpubhashblock=%s' % ip_address,
-             '-zmqpubhashwallettx=%s' % ip_address,
-             ], []]
-        self.nodes = start_nodes(
-            self.num_nodes, self.options.tmpdir, extra_args)
+        self.zmqSubSocket.connect("tcp://127.0.0.1:%i" % self.port)
+        self.nodes = self.start_nodes(self.num_nodes, self.options.tmpdir, extra_args=[
+            ['-zmqpubhashtx=tcp://127.0.0.1:'+str(self.port), '-zmqpubhashblock=tcp://127.0.0.1:'+str(self.port),
+             '-zmqpubhashwallettx=tcp://127.0.0.1:'+str(self.port)],
+            [],
+            [],
+            []
+            ])
 
     def run_test(self):
-        try:
-            self._zmq_test()
-        finally:
-            # Destroy the zmq context
-            self.log.debug("Destroying zmq context")
-            self.zmqContext.destroy(linger=None)
+        self.sync_all()
 
-    def _zmq_test(self):
         genhashes = self.nodes[0].generate(1)
         self.sync_all()
 

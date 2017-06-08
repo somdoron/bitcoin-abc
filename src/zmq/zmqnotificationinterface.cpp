@@ -10,9 +10,14 @@
 #include "validation.h"
 #include "version.h"
 
+#ifdef ENABLE_WALLET
+#include "../wallet/wallet.h"
+#endif
+
 void zmqError(const char *str) {
     LogPrint("zmq", "zmq: Error: %s, errno=%s\n", str, zmq_strerror(errno));
 }
+
 
 CZMQNotificationInterface::CZMQNotificationInterface() : pcontext(nullptr) {}
 
@@ -31,13 +36,17 @@ CZMQNotificationInterface *CZMQNotificationInterface::Create() {
     std::list<CZMQAbstractNotifier *> notifiers;
 
     factories["pubhashblock"] =
-        CZMQAbstractNotifier::Create<CZMQPublishHashBlockNotifier>;
+            CZMQAbstractNotifier::Create<CZMQPublishHashBlockNotifier>;
     factories["pubhashtx"] =
-        CZMQAbstractNotifier::Create<CZMQPublishHashTransactionNotifier>;
+            CZMQAbstractNotifier::Create<CZMQPublishHashTransactionNotifier>;
+    factories["pubhashwallettx"] =
+            CZMQAbstractNotifier::Create<CZMQPublishHashWalletTransactionNotifier>;
     factories["pubrawblock"] =
-        CZMQAbstractNotifier::Create<CZMQPublishRawBlockNotifier>;
+            CZMQAbstractNotifier::Create<CZMQPublishRawBlockNotifier>;
     factories["pubrawtx"] =
-        CZMQAbstractNotifier::Create<CZMQPublishRawTransactionNotifier>;
+            CZMQAbstractNotifier::Create<CZMQPublishRawTransactionNotifier>;
+    factories["pubrawwallettx"] =
+            CZMQAbstractNotifier::Create<CZMQPublishRawWalletTransactionNotifier>;
 
     for (std::map<std::string, CZMQNotifierFactory>::const_iterator i =
              factories.begin();
@@ -65,6 +74,14 @@ CZMQNotificationInterface *CZMQNotificationInterface::Create() {
 
     return notificationInterface;
 }
+
+#ifdef ENABLE_WALLET
+
+void CZMQNotificationInterface::RegisterWallet() {
+    pwalletMain->TransactionAddedToWallet.connect(boost::bind(&CZMQNotificationInterface::TransactionAddedToWallet, this, _1, _2));
+}
+
+#endif
 
 // Called at startup to conditionally set up ZMQ socket(s)
 bool CZMQNotificationInterface::Initialize() {
@@ -101,6 +118,12 @@ bool CZMQNotificationInterface::Initialize() {
 // Called during shutdown sequence
 void CZMQNotificationInterface::Shutdown() {
     LogPrint("zmq", "zmq: Shutdown notification interface\n");
+
+#ifdef ENABLE_WALLET
+    if (pwalletMain)
+        pwalletMain->TransactionAddedToWallet.disconnect(boost::bind(&CZMQNotificationInterface::TransactionAddedToWallet, this, _1, _2));
+#endif
+
     if (pcontext) {
         for (std::list<CZMQAbstractNotifier *>::iterator i = notifiers.begin();
              i != notifiers.end(); ++i) {
@@ -142,6 +165,24 @@ void CZMQNotificationInterface::SyncTransaction(const CTransaction &tx,
         if (notifier->NotifyTransaction(tx)) {
             i++;
         } else {
+            notifier->Shutdown();
+            i = notifiers.erase(i);
+        }
+    }
+}
+
+void CZMQNotificationInterface::TransactionAddedToWallet(const CTransactionRef& ptx, const uint256 &hashBlock) {
+    const CTransaction& tx = *ptx;
+
+    for (std::list<CZMQAbstractNotifier*>::iterator i = notifiers.begin(); i!=notifiers.end(); )
+    {
+        CZMQAbstractNotifier *notifier = *i;
+        if (notifier->NotifyWalletTransaction(tx, hashBlock))
+        {
+            i++;
+        }
+        else
+        {
             notifier->Shutdown();
             i = notifiers.erase(i);
         }
